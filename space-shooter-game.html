@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Shooter</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 2px solid #333;
+            background-color: #111;
+        }
+        #game-container {
+            position: relative;
+        }
+        #score-display {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 18px;
+        }
+        #game-over {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 36px;
+            text-align: center;
+            background-color: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+            width: 300px;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="600" height="800"></canvas>
+        <div id="score-display">Score: 0</div>
+        <div id="game-over">
+            <h2>Game Over</h2>
+            <p>Your score: <span id="final-score">0</span></p>
+            <button id="restart-btn">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        // Game variables
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score-display');
+        const gameOverScreen = document.getElementById('game-over');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const restartBtn = document.getElementById('restart-btn');
+
+        let player;
+        let projectiles = [];
+        let enemies = [];
+        let particles = [];
+        let gameOver = false;
+        let animationId;
+        let score = 0;
+        let enemySpawnInterval;
+        let lastTime = 0;
+        let deltaTime = 0;
+
+        // Key states
+        const keys = {
+            ArrowLeft: false,
+            ArrowRight: false,
+            ArrowUp: false,
+            ArrowDown: false,
+            ' ': false // Space key
+        };
+
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 40;
+                this.height = 50;
+                this.speed = 300; // pixels per second
+                this.color = '#00FFFF'; // Bright cyan color
+                this.shootCooldown = 0;
+                this.shootInterval = 200; // milliseconds
+            }
+
+            update(dt) {
+                // Move player based on key presses
+                if (keys.ArrowLeft && this.x > 0) this.x -= this.speed * dt;
+                if (keys.ArrowRight && this.x < canvas.width - this.width) this.x += this.speed * dt;
+                if (keys.ArrowUp && this.y > 0) this.y -= this.speed * dt;
+                if (keys.ArrowDown && this.y < canvas.height - this.height) this.y += this.speed * dt;
+
+                // Handle shooting
+                if (this.shootCooldown > 0) {
+                    this.shootCooldown -= dt * 1000;
+                }
+
+                if (keys[' '] && this.shootCooldown <= 0) {
+                    this.shoot();
+                    this.shootCooldown = this.shootInterval;
+                }
+            }
+
+            shoot() {
+                const projectile = {
+                    x: this.x + this.width / 2 - 2,
+                    y: this.y,
+                    width: 4,
+                    height: 15,
+                    speed: 500,
+                    color: '#0FF'
+                };
+                projectiles.push(projectile);
+                playSound('shoot');
+            }
+
+            draw() {
+                // Draw ship body
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.moveTo(this.x + this.width / 2, this.y);
+                ctx.lineTo(this.x + this.width, this.y + this.height);
+                ctx.lineTo(this.x, this.y + this.height);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Add outline to make ship more visible
+                ctx.strokeStyle = '#FF9900';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Draw engine flames
+                if (keys.ArrowUp) {
+                    ctx.fillStyle = '#FF4500';
+                    ctx.beginPath();
+                    ctx.moveTo(this.x + 10, this.y + this.height);
+                    ctx.lineTo(this.x + this.width / 2, this.y + this.height + 15);
+                    ctx.lineTo(this.x + this.width - 10, this.y + this.height);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+        }
+
+        class Enemy {
+            constructor() {
+                this.width = 30 + Math.random() * 30;
+                this.height = this.width;
+                this.x = Math.random() * (canvas.width - this.width);
+                this.y = -this.height;
+                this.speed = 100 + Math.random() * 100;
+                this.color = `hsl(${Math.random() * 360}, 50%, 50%)`;
+                this.health = Math.ceil(this.width / 10);
+                this.maxHealth = this.health;
+            }
+
+            update(dt) {
+                this.y += this.speed * dt;
+            }
+
+            draw() {
+                // Draw enemy
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+
+                // Draw health bar
+                const healthBarWidth = this.width;
+                const healthBarHeight = 5;
+                const healthPercentage = this.health / this.maxHealth;
+                
+                ctx.fillStyle = 'black';
+                ctx.fillRect(this.x, this.y - healthBarHeight - 2, healthBarWidth, healthBarHeight);
+                
+                ctx.fillStyle = healthPercentage > 0.5 ? 'green' : healthPercentage > 0.25 ? 'yellow' : 'red';
+                ctx.fillRect(this.x, this.y - healthBarHeight - 2, healthBarWidth * healthPercentage, healthBarHeight);
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.size = Math.random() * 3 + 1;
+                this.speedX = Math.random() * 6 - 3;
+                this.speedY = Math.random() * 6 - 3;
+                this.color = color;
+                this.life = 30;
+            }
+
+            update() {
+                this.x += this.speedX;
+                this.y += this.speedY;
+                this.life--;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Event listeners
+        document.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = true;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = false;
+            }
+        });
+
+        restartBtn.addEventListener('click', startGame);
+
+        // Simple sound effects using AudioContext
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(type) {
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            switch(type) {
+                case 'shoot':
+                    oscillator.type = 'square';
+                    oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+                    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+                    oscillator.start();
+                    oscillator.stop(audioContext.currentTime + 0.1);
+                    break;
+                case 'explosion':
+                    oscillator.type = 'sawtooth';
+                    oscillator.frequency.setValueAtTime(110, audioContext.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(55, audioContext.currentTime + 0.3);
+                    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+                    oscillator.start();
+                    oscillator.stop(audioContext.currentTime + 0.3);
+                    break;
+                case 'gameOver':
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(110, audioContext.currentTime + 1);
+                    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1);
+                    oscillator.start();
+                    oscillator.stop(audioContext.currentTime + 1);
+                    break;
+            }
+        }
+
+        function createExplosion(x, y, color, count = 20) {
+            for (let i = 0; i < count; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function spawnEnemy() {
+            enemies.push(new Enemy());
+        }
+
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        function updateScore(points) {
+            score += points;
+            scoreDisplay.textContent = `Score: ${score}`;
+        }
+
+        function endGame() {
+            gameOver = true;
+            clearInterval(enemySpawnInterval);
+            finalScoreDisplay.textContent = score;
+            gameOverScreen.style.display = 'block';
+            playSound('gameOver');
+        }
+
+        function updateGameArea(currentTime) {
+            if (gameOver) return;
+            
+            // Calculate delta time for smooth animation
+            if (lastTime) {
+                deltaTime = (currentTime - lastTime) / 1000; // convert to seconds
+            } else {
+                deltaTime = 0;
+            }
+            lastTime = currentTime;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Update and draw player
+            player.update(deltaTime);
+            player.draw();
+            
+            // Update and draw projectiles
+            for (let i = projectiles.length - 1; i >= 0; i--) {
+                const projectile = projectiles[i];
+                projectile.y -= projectile.speed * deltaTime;
+                
+                // Remove projectiles that are off screen
+                if (projectile.y + projectile.height < 0) {
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+                
+                // Draw projectile
+                ctx.fillStyle = projectile.color;
+                ctx.fillRect(projectile.x, projectile.y, projectile.width, projectile.height);
+            }
+            
+            // Update and draw enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                enemy.update(deltaTime);
+                
+                // Check for collision with player
+                if (checkCollision(player, enemy)) {
+                    createExplosion(player.x + player.width / 2, player.y + player.height / 2, 'white', 50);
+                    endGame();
+                    return;
+                }
+                
+                // Check for collision with projectiles
+                for (let j = projectiles.length - 1; j >= 0; j--) {
+                    const projectile = projectiles[j];
+                    if (checkCollision(projectile, enemy)) {
+                        enemy.health--;
+                        createExplosion(projectile.x, projectile.y, projectile.color, 5);
+                        projectiles.splice(j, 1);
+                        
+                        if (enemy.health <= 0) {
+                            createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2, enemy.color, 20);
+                            playSound('explosion');
+                            updateScore(Math.floor(enemy.width));
+                            enemies.splice(i, 1);
+                        }
+                        break;
+                    }
+                }
+                
+                // Remove enemies that are off screen
+                if (enemy.y > canvas.height) {
+                    enemies.splice(i, 1);
+                } else {
+                    enemy.draw();
+                }
+            }
+            
+            // Update and draw particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                if (particles[i].life <= 0) {
+                    particles.splice(i, 1);
+                } else {
+                    particles[i].draw();
+                }
+            }
+            
+            // Draw stars in the background
+            drawStars();
+            
+            // Continue the animation loop
+            animationId = requestAnimationFrame(updateGameArea);
+        }
+
+        // Create a starfield background
+        const stars = [];
+        function createStars() {
+            for (let i = 0; i < 100; i++) {
+                stars.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    size: Math.random() * 2 + 1,
+                    speed: Math.random() * 20 + 10
+                });
+            }
+        }
+
+        function drawStars() {
+            ctx.fillStyle = 'white';
+            stars.forEach(star => {
+                star.y += star.speed * deltaTime;
+                if (star.y > canvas.height) {
+                    star.y = 0;
+                    star.x = Math.random() * canvas.width;
+                }
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function startGame() {
+            // Reset game state
+            player = new Player(canvas.width / 2 - 20, canvas.height - 100);
+            projectiles = [];
+            enemies = [];
+            particles = [];
+            score = 0;
+            gameOver = false;
+            lastTime = 0;
+            
+            // Update score display
+            scoreDisplay.textContent = `Score: ${score}`;
+            
+            // Hide game over screen
+            gameOverScreen.style.display = 'none';
+            
+            // Start enemy spawning
+            clearInterval(enemySpawnInterval);
+            enemySpawnInterval = setInterval(spawnEnemy, 1500);
+            
+            // Create stars
+            createStars();
+            
+            // Start game loop
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            animationId = requestAnimationFrame(updateGameArea);
+        }
+
+        // Start the game
+        startGame();
+    </script>
+</body>
+</html>
